@@ -218,3 +218,35 @@ let app;
 document.addEventListener('DOMContentLoaded', () => { 
     app = new CEFSVestibularMonitor(); 
 });
+// Funções de ponte para o HTML (Globais)
+function resetarFiltros() {
+    if (app) app.limparFiltros();
+}
+
+function imprimirResultados() {
+    window.print();
+}
+
+function exportarCSV() {
+    if (!app || app.resultados.length === 0) {
+        alert('Nenhum resultado para exportar');
+        return;
+    }
+    
+    const headers = ['Universidade', 'Sigla', 'Tipo', 'Título', 'Prova', 'Link'];
+    const rows = app.resultados.map(e => [
+        e.universidade,
+        e.sigla,
+        e.tipo?.label || 'Outro',
+        `"${e.titulo.replace(/"/g, '""')}"`,
+        e.dataProva,
+        e.link
+    ]);
+    
+    const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `editais-cefs-2026.csv`;
+    link.click();
+}
