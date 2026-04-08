@@ -1,6 +1,6 @@
 /**
  * CEFS VESTIBULAR MONITOR
- * Aplicação Principal - Versão Final Estabilizada
+ * Aplicação Principal - Versão Final Estabilizada para Backend Próprio
  */
 
 class CEFSVestibularMonitor {
@@ -17,7 +17,7 @@ class CEFSVestibularMonitor {
         this.preencherFiltros();
         this.bindEventos();
         this.atualizarStatsIniciais();
-        console.log('CEFS Vestibular Monitor inicializado com sucesso');
+        console.log('CEFS Vestibular Monitor inicializado com sucesso [v2.0 - Render Backend]');
     }
 
     preencherFiltros() {
@@ -115,28 +115,30 @@ class CEFSVestibularMonitor {
 
         this.inicializarProgresso(universidades);
 
-        // PROCESSAMENTO SEQUENCIAL (Reduz chance de bloqueio 403/408)
+        // BUSCA SEQUENCIAL PARA ESTABILIDADE
         for (const uni of universidades) {
-            const urlInfo = { url: uni.urls[0], universidade: uni };
             try {
-                const resultado = await proxyManager.fetch(urlInfo.url);
-                this.atualizarProgresso(urlInfo, resultado);
+                // Tenta a primeira URL da universidade
+                const urlParaBuscar = uni.urls[0];
+                const resultado = await proxyManager.fetch(urlParaBuscar);
+                
+                this.atualizarProgresso(uni, resultado);
                 
                 if (resultado.success) {
-                    const editais = this.processarHTML(resultado.html, uni, urlInfo.url);
+                    const editais = this.processarHTML(resultado.html, uni, urlParaBuscar);
                     this.resultados.push(...editais);
                 }
             } catch (err) {
-                console.error(`Falha em ${uni.sigla}:`, err);
+                console.error(`Erro ao consultar ${uni.sigla}:`, err);
             }
-            // Delay técnico entre requisições
-            await new Promise(r => setTimeout(r, 1200));
+            // Pequeno delay para o servidor Render não gargalar
+            await new Promise(r => setTimeout(r, 1000));
         }
 
-        // LÓGICA DE FALLBACK: Se a busca falhar, carrega dados base
+        // LÓGICA DE CONTINGÊNCIA (FALLBACK)
         if (this.resultados.length === 0) {
-            console.warn("Sem resultados online. Ativando dados de contingência");
-            this.resultados = [...EDITAIS_BASE];
+            console.warn("Busca online sem resultados ou servidor offline. Carregando dados de fallback.");
+            this.resultados = [...EDITAIS_BASE]; // Carrega dados do data.js
         }
 
         this.resultados = this.removerDuplicatas(this.resultados);
@@ -154,7 +156,6 @@ class CEFSVestibularMonitor {
 
     inicializarProgresso(universidades) {
         const container = document.getElementById('universities-list');
-        const status = document.getElementById('loading-status');
         const progressFill = document.getElementById('progress-fill');
         
         if (container) {
@@ -167,16 +168,15 @@ class CEFSVestibularMonitor {
                 container.appendChild(div);
             });
         }
-        if (status) status.textContent = `Consultando ${universidades.length} universidades...`;
         if (progressFill) progressFill.style.width = '0%';
     }
 
-    atualizarProgresso(info, resultado) {
-        const elemento = document.getElementById(`prog-${info.universidade.sigla}`);
+    atualizarProgresso(uni, resultado) {
+        const elemento = document.getElementById(`prog-${uni.sigla}`);
         if (elemento) {
             const icon = resultado.success ? 'fa-check' : 'fa-times';
             elemento.className = `university-item ${resultado.success ? 'success' : 'error'}`;
-            elemento.innerHTML = `<i class="fas ${icon}"></i> <span><strong>${info.universidade.sigla}</strong></span>`;
+            elemento.innerHTML = `<i class="fas ${icon}"></i> <span><strong>${uni.sigla}</strong></span>`;
         }
     }
 
@@ -184,45 +184,58 @@ class CEFSVestibularMonitor {
         const editais = [];
         try {
             const doc = new DOMParser().parseFromString(html, 'text/html');
-            const containerSelector = universidade.selectores.container.split(',')[0];
+            // Tenta o primeiro seletor de container definido no universities.js
+            const containerSelector = universidade.selectores.container.split(',')[0].trim();
             const elementos = doc.querySelectorAll(containerSelector);
 
             elementos.forEach((el, i) => {
-                if (i > 4) return;
-                const tituloElem = el.querySelector(universidade.selectores.titulo.split(',')[0]);
+                if (i > 4) return; // Limita a 5 editais por universidade para não poluir
+                
+                const tituloSelector = universidade.selectores.titulo.split(',')[0].trim();
+                const tituloElem = el.querySelector(tituloSelector);
+                
                 if (tituloElem) {
-                    const texto = tituloElem.textContent.trim();
-                    const info = parser.parse(texto, url, universidade);
+                    const textoRaw = tituloElem.textContent.trim();
+                    // Passa pelo parser inteligente para extrair datas e taxas
+                    const infoExtraida = parser.parse(textoRaw, url, universidade);
+
                     editais.push({
                         id: `${universidade.sigla}-${i}-${Date.now()}`,
                         universidade: universidade.nome,
                         sigla: universidade.sigla,
                         estado: universidade.estado,
                         cidade: universidade.cidade,
-                        tipo: info.tipo,
-                        titulo: texto,
-                        dataProva: info.dataProva,
-                        inscricao: info.inscricao,
-                        taxa: info.taxa,
+                        tipo: infoExtraida.tipo,
+                        titulo: textoRaw,
+                        dataProva: infoExtraida.dataProva,
+                        inscricao: infoExtraida.inscricao,
+                        taxa: infoExtraida.taxa,
                         link: url,
-                        rawText: texto
+                        rawText: textoRaw
                     });
                 }
             });
-        } catch (e) { console.error("Erro no parser:", e); }
+        } catch (e) { 
+            console.error(`Erro no processamento de ${universidade.sigla}:`, e); 
+        }
         return editais;
     }
 
     removerDuplicatas(editais) {
         const vistos = new Set();
         return editais.filter(e => {
-            const chave = `${e.sigla}-${e.titulo.substring(0, 30).toLowerCase()}`;
+            const chave = `${e.sigla}-${e.titulo.substring(0, 40).toLowerCase()}`;
             return vistos.has(chave) ? false : vistos.add(chave);
         });
     }
 
     ordenarResultados(editais) {
-        return editais.sort((a, b) => (b.tipo?.tipo === 'VESTIBULAR_SERIADO' ? 1 : -1));
+        // Prioriza Vestibulares Seriados no topo
+        return editais.sort((a, b) => {
+            if (a.tipo?.tipo === 'VESTIBULAR_SERIADO' && b.tipo?.tipo !== 'VESTIBULAR_SERIADO') return -1;
+            if (a.tipo?.tipo !== 'VESTIBULAR_SERIADO' && b.tipo?.tipo === 'VESTIBULAR_SERIADO') return 1;
+            return 0;
+        });
     }
 
     filtrarERenderizar() {
@@ -241,13 +254,17 @@ class CEFSVestibularMonitor {
     renderizarPagina() {
         const container = document.getElementById('results-container');
         const section = document.getElementById('results-section');
+        const noResults = document.getElementById('no-results');
+        
         if (!container) return;
 
         container.innerHTML = '';
+        
         if (this.resultadosFiltrados.length === 0) {
-            document.getElementById('no-results').style.display = 'block';
+            noResults.style.display = 'block';
+            section.style.display = 'block';
         } else {
-            document.getElementById('no-results').style.display = 'none';
+            noResults.style.display = 'none';
             section.style.display = 'block';
             this.resultadosFiltrados.slice(0, this.itensPorPagina).forEach(edital => {
                 container.appendChild(this.criarCard(edital));
@@ -261,33 +278,68 @@ class CEFSVestibularMonitor {
         div.className = 'edital-card-cefs';
         const tipo = edital.tipo || { label: 'Edital', color: 'default', icon: 'fa-file' };
         
+        // Formata exibição da inscrição
+        let inscricaoTxt = 'Ver edital';
+        if (edital.inscricao && edital.inscricao.fim) {
+            inscricaoTxt = `Até ${edital.inscricao.fim}`;
+        }
+
         div.innerHTML = `
             <div class="edital-header-cefs">
-                <span class="edital-tipo-badge type-${tipo.color}"><i class="fas ${tipo.icon}"></i> ${tipo.label}</span>
+                <span class="edital-tipo-badge type-${tipo.color}">
+                    <i class="fas ${tipo.icon}"></i> ${tipo.label}
+                </span>
                 <div class="edital-universidade">${edital.universidade}</div>
+                <div class="edital-local">${edital.cidade} - ${edital.estado}</div>
             </div>
             <div class="edital-body-cefs">
                 <h4 class="edital-titulo">${edital.titulo}</h4>
-                <div class="info-value-cefs highlight">Prova: ${edital.dataProva || 'Ver edital'}</div>
-                <div class="info-value-cefs">Taxa: ${edital.taxa || 'Consultar'}</div>
+                <div class="edital-info-grid">
+                    <div class="info-item-cefs">
+                        <i class="fas fa-calendar-alt"></i>
+                        <div class="info-content">
+                            <div class="info-label-cefs">Data da Prova</div>
+                            <div class="info-value-cefs highlight">${edital.dataProva || 'A definir'}</div>
+                        </div>
+                    </div>
+                    <div class="info-item-cefs">
+                        <i class="fas fa-edit"></i>
+                        <div class="info-content">
+                            <div class="info-label-cefs">Inscrições</div>
+                            <div class="info-value-cefs">${inscricaoTxt}</div>
+                        </div>
+                    </div>
+                </div>
             </div>
             <div class="edital-footer-cefs">
-                <a href="${edital.link}" target="_blank" class="btn-edital primary">Ver Edital</a>
+                <a href="${edital.link}" target="_blank" class="btn-edital primary">
+                    <i class="fas fa-external-link-alt"></i> Abrir Edital
+                </a>
             </div>`;
         return div;
     }
 
     atualizarStats() {
         const statEditais = document.getElementById('stat-editais');
+        const statAtualizacao = document.getElementById('stat-atualizacao');
         if (statEditais) statEditais.textContent = this.resultadosFiltrados.length;
+        if (statAtualizacao) statAtualizacao.textContent = new Date().toLocaleTimeString('pt-BR');
     }
 
     limparFiltros() {
-        ['filter-estado', 'filter-tipo', 'filter-universidade'].forEach(id => document.getElementById(id).value = 'todos');
-        document.getElementById('filter-curso').value = '';
+        const ids = ['filter-estado', 'filter-tipo', 'filter-universidade'];
+        ids.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.value = 'todos';
+        });
+        const curso = document.getElementById('filter-curso');
+        if (curso) curso.value = '';
         this.filtrarERenderizar();
     }
 }
 
+// Inicialização Global
 let app;
-document.addEventListener('DOMContentLoaded', () => { app = new CEFSVestibularMonitor(); });
+document.addEventListener('DOMContentLoaded', () => { 
+    app = new CEFSVestibularMonitor(); 
+});
