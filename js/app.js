@@ -1,253 +1,325 @@
 /**
- * Aplicação principal do Vestibular Monitor
+ * CEFS VESTIBULAR MONITOR
+ * Aplicação principal - Versão Completa
  */
 
-class VestibularMonitorApp {
+class CEFSVestibularMonitor {
     constructor() {
         this.resultados = [];
+        this.resultadosFiltrados = [];
         this.emExecucao = false;
+        this.paginaAtual = 1;
+        this.itensPorPagina = 9;
         this.init();
     }
 
     init() {
         this.preencherFiltros();
         this.bindEventos();
-        this.atualizarStats();
+        this.atualizarStatsIniciais();
+        console.log('CEFS Vestibular Monitor inicializado');
     }
 
-    /**
-     * Preenche os filtros dinâmicos
-     */
     preencherFiltros() {
-        const selectUni = document.getElementById('filter-universidade');
+        const select = document.getElementById('filter-universidade');
+        if (!select) return;
         
-        // Agrupar por estado
         const porEstado = {};
         UNIVERSIDADES.forEach(u => {
             if (!porEstado[u.estado]) porEstado[u.estado] = [];
             porEstado[u.estado].push(u);
         });
 
-        // Criar optgroups
         Object.keys(porEstado).sort().forEach(estado => {
-            const optgroup = document.createElement('optgroup');
-            optgroup.label = `${estado} (${porEstado[estado].length})`;
+            const group = document.createElement('optgroup');
+            group.label = `${estado} - ${this.getEstadoNome(estado)}`;
             
             porEstado[estado].forEach(u => {
-                const option = document.createElement('option');
-                option.value = u.sigla;
-                option.textContent = `${u.sigla} - ${u.cidade}`;
-                optgroup.appendChild(option);
+                const opt = document.createElement('option');
+                opt.value = u.sigla;
+                let texto = `${u.sigla} - ${u.cidade}`;
+                if (u.temSeriado) texto += ' ★';
+                opt.textContent = texto;
+                group.appendChild(opt);
             });
             
-            selectUni.appendChild(optgroup);
+            select.appendChild(group);
         });
     }
 
-    /**
-     * Vincula eventos aos elementos
-     */
+    getEstadoNome(sigla) {
+        const nomes = { 'MG': 'Minas Gerais', 'SP': 'São Paulo', 'RJ': 'Rio de Janeiro' };
+        return nomes[sigla] || sigla;
+    }
+
     bindEventos() {
-        document.getElementById('btn-buscar').addEventListener('click', () => this.iniciarBusca());
+        const btnBuscar = document.getElementById('btn-buscar');
+        const btnLimpar = document.getElementById('btn-limpar');
         
+        if (btnBuscar) {
+            btnBuscar.addEventListener('click', (e) => {
+                e.preventDefault();
+                this.iniciarBusca();
+            });
+        }
+        
+        if (btnLimpar) {
+            btnLimpar.addEventListener('click', (e) => {
+                e.preventDefault();
+                this.limparFiltros();
+            });
+        }
+
         // Filtros em tempo real
         ['filter-estado', 'filter-tipo', 'filter-universidade'].forEach(id => {
-            document.getElementById(id).addEventListener('change', () => this.filtrarResultados());
+            const el = document.getElementById(id);
+            if (el) {
+                el.addEventListener('change', () => {
+                    if (this.resultados.length > 0) this.filtrarERenderizar();
+                });
+            }
         });
     }
 
-    /**
-     * Inicia processo de busca
-     */
+    atualizarStatsIniciais() {
+        document.getElementById('stat-universidades').textContent = UNIVERSIDADES.length;
+        document.getElementById('stat-editais').textContent = '-';
+    }
+
     async iniciarBusca() {
-        if (this.emExecucao) return;
+        if (this.emExecucao) {
+            console.log('Busca já em execução');
+            return;
+        }
         
         this.emExecucao = true;
         this.resultados = [];
+        this.paginaAtual = 1;
         
         const btn = document.getElementById('btn-buscar');
         const loading = document.getElementById('loading');
         const resultsSection = document.getElementById('results-section');
         
         // UI de loading
-        btn.disabled = true;
-        loading.style.display = 'flex';
-        resultsSection.style.display = 'none';
-        
-        // Obter universidades filtradas
-        const filtroEstado = document.getElementById('filter-estado').value;
-        const filtroUni = document.getElementById('filter-universidade').value;
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> <span>BUSCANDO...</span>';
+        }
+        if (loading) loading.style.display = 'flex';
+        if (resultsSection) resultsSection.style.display = 'none';
+
+        // Obter filtros
+        const filtroEstado = document.getElementById('filter-estado')?.value || 'todos';
+        const filtroUni = document.getElementById('filter-universidade')?.value || 'todos';
         
         let universidades = UNIVERSIDADES;
-        
         if (filtroUni !== 'todos') {
             universidades = universidades.filter(u => u.sigla === filtroUni);
         } else if (filtroEstado !== 'todos') {
             universidades = universidades.filter(u => u.estado === filtroEstado);
         }
 
-        // Preparar lista de URLs
+        console.log(`Buscando em ${universidades.length} universidades...`);
+
+        // Preparar URLs
         const urls = [];
         universidades.forEach(uni => {
             uni.urls.forEach((url, idx) => {
-                urls.push({
-                    url: url,
-                    universidade: uni,
-                    prioridade: idx // URLs principais têm prioridade
+                urls.push({ 
+                    url: url, 
+                    universidade: uni, 
+                    prioridade: idx,
+                    id: `${uni.sigla}-${idx}`
                 });
             });
         });
 
-        // Inicializar UI de progresso
         this.inicializarProgresso(universidades);
 
-        // Executar buscas
         try {
-            const resultados = await proxyManager.fetchAll(urls, (info, resultado) => {
-                this.atualizarProgresso(info, resultado);
+            // Buscar em lotes de 3 para não sobrecarregar
+            const loteSize = 3;
+            for (let i = 0; i < urls.length; i += loteSize) {
+                const lote = urls.slice(i, i + loteSize);
                 
-                if (resultado.success) {
-                    const editais = this.processarHtml(resultado.html, info.universidade, info.url);
-                    this.resultados.push(...editais);
-                }
-            });
+                await Promise.all(lote.map(async (urlInfo) => {
+                    const resultado = await proxyManager.fetch(urlInfo.url);
+                    this.atualizarProgresso(urlInfo, resultado);
+                    
+                    if (resultado.success) {
+                        const editais = this.processarHTML(
+                            resultado.html, 
+                            urlInfo.universidade, 
+                            urlInfo.url
+                        );
+                        this.resultados.push(...editais);
+                        console.log(`${urlInfo.universidade.sigla}: ${editais.length} editais`);
+                    }
+                }));
 
-            // Processar e exibir resultados
+                // Delay entre lotes
+                if (i + loteSize < urls.length) {
+                    await new Promise(r => setTimeout(r, 1000));
+                }
+            }
+
+            console.log(`Total bruto: ${this.resultados.length} editais`);
+            
+            // Processar resultados
             this.resultados = this.removerDuplicatas(this.resultados);
             this.resultados = this.ordenarResultados(this.resultados);
             
-            this.exibirResultados();
+            console.log(`Total após deduplicação: ${this.resultados.length} editais`);
+            
+            this.filtrarERenderizar();
             this.atualizarStats();
             
-        } catch (error) {
-            console.error('Erro na busca:', error);
-            alert('Ocorreu um erro durante a busca. Tente novamente.');
+        } catch (err) {
+            console.error('Erro na busca:', err);
+            alert('Ocorreu um erro durante a busca. Verifique o console para detalhes.');
         } finally {
             this.emExecucao = false;
-            btn.disabled = false;
-            loading.style.display = 'none';
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-search"></i> <span>BUSCAR EDITAIS AGORA</span>';
+            }
+            if (loading) loading.style.display = 'none';
         }
     }
 
-    /**
-     * Inicializa interface de progresso
-     */
     inicializarProgresso(universidades) {
         const container = document.getElementById('universities-list');
         const status = document.getElementById('loading-status');
+        const progressFill = document.getElementById('progress-fill');
         
-        container.innerHTML = '';
-        status.textContent = `Verificando ${universidades.length} universidades...`;
+        if (container) {
+            container.innerHTML = '';
+            universidades.forEach(uni => {
+                const div = document.createElement('div');
+                div.className = 'university-item pending';
+                div.id = `prog-${uni.sigla}`;
+                div.innerHTML = `
+                    <i class="fas fa-clock"></i>
+                    <span><strong>${uni.sigla}</strong> - ${uni.nome.substring(0, 30)}...</span>
+                `;
+                container.appendChild(div);
+            });
+        }
         
-        universidades.forEach(uni => {
-            const div = document.createElement('div');
-            div.className = 'university-item pending';
-            div.id = `prog-${uni.sigla}`;
-            div.innerHTML = `
-                <i class="fas fa-clock"></i>
-                <span><strong>${uni.sigla}</strong> - ${uni.nome}</span>
-            `;
-            container.appendChild(div);
-        });
-        
-        document.getElementById('progress-fill').style.width = '0%';
+        if (status) status.textContent = `Consultando ${universidades.length} universidades...`;
+        if (progressFill) progressFill.style.width = '0%';
     }
 
-    /**
-     * Atualiza progresso visual
-     */
     atualizarProgresso(info, resultado) {
         const sigla = info.universidade.sigla;
         const elemento = document.getElementById(`prog-${sigla}`);
         
         if (elemento) {
-            elemento.className = `university-item ${resultado.success ? 'success' : 'error'}`;
+            const icon = resultado.success ? 'fa-check' : 'fa-times';
+            const classe = resultado.success ? 'success' : 'error';
+            elemento.className = `university-item ${classe}`;
             elemento.innerHTML = `
-                <i class="fas ${resultado.success ? 'fa-check' : 'fa-times'}"></i>
+                <i class="fas ${icon}"></i>
                 <span><strong>${sigla}</strong> - ${resultado.success ? 'OK' : 'Erro'}</span>
             `;
         }
 
         // Atualizar barra de progresso
-        const total = document.querySelectorAll('.university-item').length;
+        const total = UNIVERSIDADES.length;
         const processados = document.querySelectorAll('.university-item.success, .university-item.error').length;
-        const percentual = (processados / total) * 100;
+        const percentual = Math.round((processados / total) * 100);
         
-        document.getElementById('progress-fill').style.width = `${percentual}%`;
-        document.getElementById('loading-status').textContent = 
-            `Processando... ${processados}/${total} universidades`;
+        const progressFill = document.getElementById('progress-fill');
+        const loadingStatus = document.getElementById('loading-status');
+        
+        if (progressFill) progressFill.style.width = `${percentual}%`;
+        if (loadingStatus) loadingStatus.textContent = `Progresso: ${percentual}% (${processados}/${total})`;
     }
 
-    /**
-     * Processa HTML e extrai editais
-     */
-    processarHtml(html, universidade, url) {
+    processarHTML(html, universidade, url) {
         const editais = [];
         
         try {
-            const parser = new DOMParser();
-            const doc = parser.parseFromString(html, 'text/html');
+            const domParser = new DOMParser();
+            const doc = domParser.parseFromString(html, 'text/html');
             
             // Tentar múltiplos seletores
             const seletores = universidade.selectores.container.split(',').map(s => s.trim());
             let elementos = [];
             
             for (const seletor of seletores) {
-                elementos = doc.querySelectorAll(seletor);
-                if (elementos.length > 0) break;
+                try {
+                    elementos = doc.querySelectorAll(seletor);
+                    if (elementos.length > 0) break;
+                } catch (e) {
+                    continue;
+                }
             }
 
-            elementos.forEach((el, idx) => {
-                // Extrair texto
+            // Limitar a 5 elementos por página para evitar excesso
+            const maxElementos = Math.min(elementos.length, 5);
+            
+            for (let i = 0; i < maxElementos; i++) {
+                const el = elementos[i];
+                
+                // Extrair título
                 let titulo = '';
                 for (const sel of universidade.selectores.titulo.split(',')) {
-                    const elem = el.querySelector(sel.trim());
-                    if (elem) {
-                        titulo = elem.textContent.trim();
-                        break;
-                    }
+                    try {
+                        const elem = el.querySelector(sel.trim());
+                        if (elem && elem.textContent) {
+                            titulo = elem.textContent.trim();
+                            break;
+                        }
+                    } catch (e) { continue; }
                 }
 
-                if (!titulo || titulo.length < 10) return;
+                if (!titulo || titulo.length < 10) continue;
 
                 // Extrair link
                 let link = '';
                 for (const sel of universidade.selectores.link.split(',')) {
-                    const elem = el.querySelector(sel.trim());
-                    if (elem && elem.href) {
-                        link = elem.href;
-                        break;
-                    }
+                    try {
+                        const elem = el.querySelector(sel.trim());
+                        if (elem && elem.href) {
+                            link = elem.href;
+                            break;
+                        }
+                    } catch (e) { continue; }
                 }
                 if (!link) link = url;
 
                 // Extrair descrição
                 let descricao = '';
                 for (const sel of universidade.selectores.descricao.split(',')) {
-                    const elem = el.querySelector(sel.trim());
-                    if (elem) {
-                        descricao = elem.textContent.trim();
-                        break;
-                    }
+                    try {
+                        const elem = el.querySelector(sel.trim());
+                        if (elem && elem.textContent) {
+                            descricao = elem.textContent.trim();
+                            break;
+                        }
+                    } catch (e) { continue; }
                 }
 
                 // Extrair data
                 let data = '';
                 for (const sel of universidade.selectores.data.split(',')) {
-                    const elem = el.querySelector(sel.trim());
-                    if (elem) {
-                        data = elem.textContent.trim();
-                        break;
-                    }
+                    try {
+                        const elem = el.querySelector(sel.trim());
+                        if (elem && elem.textContent) {
+                            data = elem.textContent.trim();
+                            break;
+                        }
+                    } catch (e) { continue; }
                 }
 
-                // Processar com parser inteligente
+                // Usar parser inteligente
                 const textoCompleto = `${titulo} ${descricao}`;
                 const info = parser.parse(textoCompleto, link, universidade);
 
-                // Criar objeto resultado
-                editais.push({
-                    id: `${universidade.sigla}-${idx}-${Date.now()}`,
+                // Criar objeto edital
+                const edital = {
+                    id: `${universidade.sigla}-${i}-${Date.now()}`,
                     universidade: universidade.nome,
                     sigla: universidade.sigla,
                     estado: universidade.estado,
@@ -261,10 +333,16 @@ class VestibularMonitorApp {
                     publicoAlvo: info.publicoAlvo,
                     vagas: info.vagas,
                     link: info.link,
-                    descricao: descricao.substring(0, 300),
-                    dataDeteccao: new Date().toLocaleString('pt-BR')
-                });
-            });
+                    descricao: descricao.substring(0, 250),
+                    dataDeteccao: new Date().toLocaleString('pt-BR'),
+                    rawText: textoCompleto
+                };
+
+                // Filtrar apenas editais relevantes (não notícias genéricas)
+                if (this.isEditalRelevante(edital)) {
+                    editais.push(edital);
+                }
+            }
 
         } catch (error) {
             console.error(`Erro ao processar ${universidade.sigla}:`, error);
@@ -273,156 +351,186 @@ class VestibularMonitorApp {
         return editais;
     }
 
-    /**
-     * Remove duplicatas baseado no título e universidade
-     */
+    isEditalRelevante(edital) {
+        const texto = (edital.titulo + ' ' + edital.descricao).toLowerCase();
+        
+        // Palavras-chave que indicam edital de vestibular
+        const palavrasChave = [
+            'vestibular', 'edital', 'ingresso', 'seleção', 'concurso',
+            'prova', 'inscrição', 'matrícula', 'calendário', 'fuvest',
+            'comvest', 'vunesp', 'sisu', 'enem', 'seriado', 'pas', 'psv'
+        ];
+        
+        return palavrasChave.some(palavra => texto.includes(palavra));
+    }
+
     removerDuplicatas(editais) {
         const vistos = new Set();
         return editais.filter(e => {
-            const chave = `${e.sigla}-${e.titulo.substring(0, 50)}`;
+            const chave = `${e.sigla}-${e.titulo.substring(0, 50).toLowerCase()}`;
             if (vistos.has(chave)) return false;
             vistos.add(chave);
             return true;
         });
     }
 
-    /**
-     * Ordena resultados por relevância
-     */
     ordenarResultados(editais) {
+        const prioridade = {
+            'VESTIBULAR_SERIADO': 3,
+            'VESTIBULAR_CONVENCIONAL': 2,
+            'SISU/ENEM': 1,
+            'OUTRO': 0
+        };
+        
         return editais.sort((a, b) => {
-            // Prioridade: Seriados > Convencionais > SISU
-            const prioridade = {
-                'VESTIBULAR_SERIADO': 3,
-                'VESTIBULAR_CONVENCIONAL': 2,
-                'SISU/ENEM': 1,
-                'OUTRO': 0
-            };
-            
-            const priA = prioridade[a.tipo.tipo] || 0;
-            const priB = prioridade[b.tipo.tipo] || 0;
-            
+            const priA = prioridade[a.tipo?.tipo] || 0;
+            const priB = prioridade[b.tipo?.tipo] || 0;
             if (priA !== priB) return priB - priA;
-            
-            // Depois por data de detecção (mais recente primeiro)
             return new Date(b.dataDeteccao) - new Date(a.dataDeteccao);
         });
     }
 
-    /**
-     * Exibe resultados na tela
-     */
-    exibirResultados() {
+    filtrarERenderizar() {
+        const filtroTipo = document.getElementById('filter-tipo')?.value || 'todos';
+        const filtroCurso = document.getElementById('filter-curso')?.value?.toLowerCase() || '';
+        const apenasAbertas = document.getElementById('check-inscricoes-abertas')?.checked || false;
+
+        this.resultadosFiltrados = this.resultados.filter(e => {
+            // Filtro por tipo
+            if (filtroTipo !== 'todos' && e.tipo?.tipo !== filtroTipo) {
+                return false;
+            }
+            
+            // Filtro por curso
+            if (filtroCurso && !e.rawText?.toLowerCase().includes(filtroCurso)) {
+                return false;
+            }
+            
+            // Filtro inscrições abertas
+            if (apenasAbertas && e.inscricao?.status !== 'aberta') {
+                return false;
+            }
+            
+            return true;
+        });
+
+        this.renderizarPagina();
+    }
+
+    renderizarPagina() {
         const container = document.getElementById('results-container');
         const section = document.getElementById('results-section');
         const noResults = document.getElementById('no-results');
+        const countSpan = document.getElementById('results-count');
         
+        if (!container) return;
+
+        // Paginação
+        const inicio = (this.paginaAtual - 1) * this.itensPorPagina;
+        const fim = inicio + this.itensPorPagina;
+        const paginaItens = this.resultadosFiltrados.slice(inicio, fim);
+
         container.innerHTML = '';
-        
-        // Aplicar filtros atuais
-        const filtrados = this.aplicarFiltrosTela(this.resultados);
-        
-        if (filtrados.length === 0) {
-            section.style.display = 'block';
-            noResults.style.display = 'block';
+
+        if (paginaItens.length === 0) {
+            if (section) section.style.display = 'block';
+            if (noResults) noResults.style.display = 'block';
+            if (countSpan) countSpan.textContent = '(0 editais)';
             return;
         }
-        
-        noResults.style.display = 'none';
-        section.style.display = 'block';
 
-        filtrados.forEach(edital => {
+        if (noResults) noResults.style.display = 'none';
+        if (section) section.style.display = 'block';
+        if (countSpan) countSpan.textContent = `(${this.resultadosFiltrados.length} editais)`;
+
+        paginaItens.forEach(edital => {
             const card = this.criarCard(edital);
             container.appendChild(card);
         });
 
-        // Scroll suave para resultados
-        section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        this.renderizarPaginacao();
+        
+        // Scroll suave
+        section?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 
-    /**
-     * Cria card de edital
-     */
     criarCard(edital) {
         const div = document.createElement('div');
-        div.className = 'edital-card';
+        div.className = 'edital-card-cefs';
         
-        const tipo = edital.tipo;
+        const tipo = edital.tipo || { tipo: 'OUTRO', label: 'Edital', color: 'default', icon: 'fa-file-alt' };
         
-        // Formatar datas
+        // Formatar inscrição
         let inscricaoHtml = '';
         if (edital.inscricao) {
             if (edital.inscricao.inicio && edital.inscricao.fim) {
-                inscricaoHtml = `
-                    <div class="info-value ${edital.inscricao.status === 'aberta' ? 'highlight' : ''}">
-                        ${edital.inscricao.inicio} até ${edital.inscricao.fim}
-                        ${edital.inscricao.status === 'aberta' ? ' (ABERTA!)' : ''}
-                    </div>
-                `;
+                const statusClass = edital.inscricao.status === 'aberta' ? 'highlight' : '';
+                const statusText = edital.inscricao.status === 'aberta' ? ' - ABERTA!' : '';
+                inscricaoHtml = `<div class="info-value-cefs ${statusClass}">${edital.inscricao.inicio} até ${edital.inscricao.fim}${statusText}</div>`;
             } else if (edital.inscricao.fim) {
-                inscricaoHtml = `<div class="info-value">Até ${edital.inscricao.fim}</div>`;
+                inscricaoHtml = `<div class="info-value-cefs">Até ${edital.inscricao.fim}</div>`;
             }
         } else {
-            inscricaoHtml = '<div class="info-value">Consultar edital</div>';
+            inscricaoHtml = '<div class="info-value-cefs">Consultar edital</div>';
         }
 
         // Documentação
-        const docsHtml = edital.documentacao 
-            ? edital.documentacao.slice(0, 4).map(d => `<li>${d}</li>`).join('')
-            : '<li>Consultar edital oficial</li>';
+        const docsHtml = edital.documentacao?.slice(0, 3).map(d => 
+            `<li><i class="fas fa-check-circle" style="color: var(--cefs-vermelho); font-size: 0.8em; margin-right: 5px;"></i>${d}</li>`
+        ).join('') || '<li>Consultar edital oficial</li>';
 
         div.innerHTML = `
-            <div class="edital-header">
-                <span class="edital-type type-${tipo.color}">
+            <div class="edital-header-cefs">
+                <span class="edital-tipo-badge type-${tipo.color}">
                     <i class="fas ${tipo.icon}"></i> ${tipo.label}
                 </span>
-                <div class="edital-university">${edital.universidade}</div>
-                <div class="edital-location">
+                <div class="edital-universidade">${edital.universidade}</div>
+                <div class="edital-local">
                     <i class="fas fa-map-marker-alt"></i> ${edital.cidade} - ${edital.estado}
                 </div>
             </div>
             
-            <div class="edital-body">
-                <h3 class="edital-title">${edital.titulo}</h3>
+            <div class="edital-body-cefs">
+                <h4 class="edital-titulo">${edital.titulo}</h4>
                 
-                <div class="edital-info">
-                    <div class="info-row">
+                <div class="edital-info-grid">
+                    <div class="info-item-cefs">
                         <i class="fas fa-calendar-check"></i>
-                        <div>
-                            <div class="info-label">Data da Prova</div>
-                            <div class="info-value highlight">${edital.dataProva || 'A definir'}</div>
+                        <div class="info-content">
+                            <div class="info-label-cefs">Data da Prova</div>
+                            <div class="info-value-cefs highlight">${edital.dataProva || 'A definir'}</div>
                         </div>
                     </div>
                     
-                    <div class="info-row">
+                    <div class="info-item-cefs">
                         <i class="fas fa-edit"></i>
-                        <div>
-                            <div class="info-label">Inscrições</div>
+                        <div class="info-content">
+                            <div class="info-label-cefs">Inscrições</div>
                             ${inscricaoHtml}
                         </div>
                     </div>
                     
-                    <div class="info-row">
+                    <div class="info-item-cefs">
                         <i class="fas fa-money-bill-wave"></i>
-                        <div>
-                            <div class="info-label">Taxa de Inscrição</div>
-                            <div class="info-value">${edital.taxa}</div>
+                        <div class="info-content">
+                            <div class="info-label-cefs">Taxa</div>
+                            <div class="info-value-cefs">${edital.taxa || 'Consultar'}</div>
                         </div>
                     </div>
                     
-                    <div class="info-row">
+                    <div class="info-item-cefs">
                         <i class="fas fa-users"></i>
-                        <div>
-                            <div class="info-label">Público-Alvo</div>
-                            <div class="info-value">${edital.publicoAlvo}</div>
+                        <div class="info-content">
+                            <div class="info-label-cefs">Público-Alvo</div>
+                            <div class="info-value-cefs">${edital.publicoAlvo}</div>
                         </div>
                     </div>
                     
-                    <div class="info-row">
+                    <div class="info-item-cefs">
                         <i class="fas fa-file-alt"></i>
-                        <div>
-                            <div class="info-label">Documentação Necessária</div>
-                            <ul style="margin: 5px 0 0 0; padding-left: 20px; font-size: 0.9em;">
+                        <div class="info-content">
+                            <div class="info-label-cefs">Documentação</div>
+                            <ul class="info-docs">
                                 ${docsHtml}
                             </ul>
                         </div>
@@ -430,4 +538,142 @@ class VestibularMonitorApp {
                 </div>
             </div>
             
-           
+            <div class="edital-footer-cefs">
+                <a href="${edital.link}" target="_blank" class="btn-edital primary">
+                    <i class="fas fa-external-link-alt"></i> Ver Edital
+                </a>
+                <button class="btn-edital secondary" onclick="copiarInfo('${edital.id}')">
+                    <i class="fas fa-copy"></i> Copiar
+                </button>
+            </div>
+        `;
+        
+        return div;
+    }
+
+    renderizarPaginacao() {
+        const container = document.getElementById('pagination');
+        const info = document.getElementById('pagina-atual');
+        
+        if (!container || !info) return;
+
+        const totalPaginas = Math.ceil(this.resultadosFiltrados.length / this.itensPorPagina);
+        
+        if (totalPaginas <= 1) {
+            container.style.display = 'none';
+            return;
+        }
+
+        container.style.display = 'flex';
+        info.textContent = `Página ${this.paginaAtual} de ${totalPaginas}`;
+        
+        // Habilitar/desabilitar botões
+        const botoes = container.querySelectorAll('.btn-page');
+        if (botoes[0]) botoes[0].disabled = this.paginaAtual === 1;
+        if (botoes[1]) botoes[1].disabled = this.paginaAtual === totalPaginas;
+    }
+
+    paginaAnterior() {
+        if (this.paginaAtual > 1) {
+            this.paginaAtual--;
+            this.renderizarPagina();
+        }
+    }
+
+    proximaPagina() {
+        const totalPaginas = Math.ceil(this.resultadosFiltrados.length / this.itensPorPagina);
+        if (this.paginaAtual < totalPaginas) {
+            this.paginaAtual++;
+            this.renderizarPagina();
+        }
+    }
+
+    atualizarStats() {
+        const statEditais = document.getElementById('stat-editais');
+        const statAtualizacao = document.getElementById('stat-atualizacao');
+        
+        if (statEditais) statEditais.textContent = this.resultadosFiltrados.length;
+        if (statAtualizacao) statAtualizacao.textContent = new Date().toLocaleTimeString('pt-BR');
+    }
+
+    limparFiltros() {
+        document.getElementById('filter-estado').value = 'todos';
+        document.getElementById('filter-tipo').value = 'todos';
+        document.getElementById('filter-universidade').value = 'todos';
+        document.getElementById('filter-curso').value = '';
+        document.getElementById('check-inscricoes-abertas').checked = false;
+        
+        if (this.resultados.length > 0) {
+            this.filtrarERenderizar();
+        }
+    }
+}
+
+// Instanciar quando DOM estiver pronto
+let app;
+document.addEventListener('DOMContentLoaded', () => {
+    app = new CEFSVestibularMonitor();
+});
+
+// Funções globais para botões
+function paginaAnterior() {
+    app?.paginaAnterior();
+}
+
+function proximaPagina() {
+    app?.proximaPagina();
+}
+
+function exportarCSV() {
+    if (!app || app.resultadosFiltrados.length === 0) {
+        alert('Nenhum resultado para exportar');
+        return;
+    }
+    
+    const headers = ['Universidade', 'Sigla', 'Tipo', 'Título', 'Data Prova', 'Inscrição', 'Taxa', 'Link'];
+    const rows = app.resultadosFiltrados.map(e => [
+        e.universidade,
+        e.sigla,
+        e.tipo?.label || 'Outro',
+        `"${e.titulo.replace(/"/g, '""')}"`,
+        e.dataProva || '',
+        e.inscricao ? `${e.inscricao.inicio || ''} a ${e.inscricao.fim || ''}` : '',
+        e.taxa || '',
+        e.link
+    ]);
+    
+    const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `editais-cefs-${new Date().toISOString().split('T')[0]}.csv`;
+    link.click();
+}
+
+function imprimirResultados() {
+    window.print();
+}
+
+function compartilhar() {
+    if (navigator.share) {
+        navigator.share({
+            title: 'CEFS Vestibular Monitor',
+            text: `Encontrei ${app?.resultadosFiltrados.length || 0} editais de vestibular!`,
+            url: window.location.href
+        });
+    } else {
+        alert('Link copiado para a área de transferência!');
+    }
+}
+
+function resetarFiltros() {
+    app?.limparFiltros();
+}
+
+function copiarInfo(id) {
+    const edital = app?.resultadosFiltrados.find(e => e.id === id);
+    if (edital) {
+        const texto = `${edital.universidade} - ${edital.titulo}\nData: ${edital.dataProva || 'A definir'}\nLink: ${edital.link}`;
+        navigator.clipboard?.writeText(texto).then(() => alert('Informações copiadas!'));
+    }
+}
