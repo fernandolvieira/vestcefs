@@ -1,107 +1,147 @@
 /**
- * Gerenciador de requisições com proxy CORS
+ * Gerenciador de Proxy CORS
  * Resolve problema de CORS ao acessar sites das universidades
  */
 
 class ProxyManager {
     constructor() {
-        // Lista de proxies CORS gratuitos (ordem de preferência)
+        // Lista de proxies CORS gratuitos
         this.proxies = [
             {
                 name: 'AllOrigins',
                 url: 'https://api.allorigins.win/raw?url=',
-                active: true
+                active: true,
+                timeout: 15000
+            },
+            {
+                name: 'AllOrigins2',
+                url: 'https://api.allorigins.win/get?url=',
+                active: true,
+                timeout: 15000,
+                needsParse: true // Retorna JSON com conteúdo em base64
             },
             {
                 name: 'CORS-Anywhere',
                 url: 'https://cors-anywhere.herokuapp.com/',
-                active: true
-            },
-            {
-                name: 'ThingProxy',
-                url: 'https://thingproxy.freeboard.io/fetch/',
-                active: true
+                active: true,
+                timeout: 20000
             }
         ];
         
         this.proxyAtual = 0;
-        this.timeout = 15000; // 15 segundos
+        this.maxTentativas = 3;
     }
 
     /**
-     * Busca conteúdo de uma URL usando proxy
+     * Faz requisição através de proxy
      */
-    async fetch(url, tentativas = 3) {
-        let ultimoErro;
-        
-        for (let i = 0; i < tentativas; i++) {
-            const proxy = this.proxies[this.proxyAtual];
-            
-            if (!proxy.active) {
-                this.rotacionarProxy();
-                continue;
-            }
-            
-            try {
-                const proxyUrl = proxy.url + encodeURIComponent(url);
-                
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), this.timeout);
-                
-                const response = await fetch(proxyUrl, {
-                    method: 'GET',
-                    headers: {
-                        'Origin': window.location.origin
-                    },
-                    signal: controller.signal
-                });
-                
-                clearTimeout(timeoutId);
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}`);
-                }
-                
-                const html = await response.text();
-                return { success: true, html, proxy: proxy.name };
-                
-            } catch (error) {
-                ultimoErro = error;
-                console.warn(`Proxy ${proxy.name} falhou:`, error.message);
-                
-                // Desativar proxy temporariamente se falhar
-                if (error.message.includes('403') || error.message.includes('429')) {
-                    proxy.active = false;
-                    setTimeout(() => proxy.active = true, 60000); // Reativar em 1 min
-                }
-                
-                this.rotacionarProxy();
-            }
+    async fetch(url, tentativa = 0) {
+        if (tentativa >= this.maxTentativas) {
+            return { 
+                success: false, 
+                error: 'Máximo de tentativas atingido',
+                html: null 
+            };
         }
+
+        const proxy = this.proxies[this.proxyAtual];
         
-        return { 
-            success: false, 
-            error: ultimoErro?.message || 'Todas as tentativas falharam',
-            html: null 
-        };
+        if (!proxy.active) {
+            this.rotacionarProxy();
+            return this.fetch(url, tentativa + 1);
+        }
+
+        try {
+            const proxyUrl = proxy.url + encodeURIComponent(url);
+            
+            console.log(`[${proxy.name}] Buscando: ${url.substring(0, 50)}...`);
+            
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), proxy.timeout);
+            
+            const response = await fetch(proxyUrl, {
+                method: 'GET',
+                headers: {
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                    'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8',
+                    'Origin': window.location.origin
+                },
+                signal: controller.signal
+            });
+            
+            clearTimeout(timeoutId);
+            
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            
+            let html;
+            
+            if (proxy.needsParse) {
+                // AllOrigins formato JSON
+                const data = await response.json();
+                html = data.contents || atob(data.contents_b64 || '');
+            } else {
+                html = await response.text();
+            }
+            
+            // Verificar se retornou algo útil
+            if (!html || html.length < 100) {
+                throw new Error('Resposta vazia ou muito curta');
+            }
+            
+            // Verificar se não é página de erro do proxy
+            if (html.includes('error') && html.length < 500) {
+                throw new Error('Possível erro no proxy');
+            }
+            
+            return { 
+                success: true, 
+                html: html,
+                proxy: proxy.name 
+            };
+            
+        } catch (error) {
+            console.warn(`Proxy ${proxy.name} falhou:`, error.message);
+            
+            // Desativar temporariamente em caso de erro específico
+            if (error.message.includes('403') || 
+                error.message.includes('429') || 
+                error.message.includes('blocked')) {
+                proxy.active = false;
+                setTimeout(() => {
+                    proxy.active = true;
+                    console.log(`Proxy ${proxy.name} reativado`);
+                }, 60000);
+            }
+            
+            this.rotacionarProxy();
+            return this.fetch(url, tentativa + 1);
+        }
     }
 
     /**
-     * Rotaciona para o próximo proxy
+     * Rotaciona para próximo proxy disponível
      */
     rotacionarProxy() {
-        this.proxyAtual = (this.proxyAtual + 1) % this.proxies.length;
+        const inicial = this.proxyAtual;
+        do {
+            this.proxyAtual = (this.proxyAtual + 1) % this.proxies.length;
+            if (this.proxies[this.proxyAtual].active) break;
+        } while (this.proxyAtual !== inicial);
+        
+        console.log(`Rotacionado para proxy: ${this.proxies[this.proxyAtual].name}`);
     }
 
     /**
-     * Busca múltiplas URLs em paralelo com limite
+     * Busca múltiplas URLs com controle de concorrência
      */
     async fetchAll(urls, onProgress) {
         const resultados = [];
-        const limite = 3; // Máximo de requisições simultâneas
+        const concurrency = 2; // Máximo 2 requisições simultâneas
         
-        for (let i = 0; i < urls.length; i += limite) {
-            const batch = urls.slice(i, i + limite);
+        for (let i = 0; i < urls.length; i += concurrency) {
+            const batch = urls.slice(i, i + concurrency);
             
             const promises = batch.map(async (urlInfo) => {
                 const resultado = await this.fetch(urlInfo.url);
@@ -113,12 +153,12 @@ class ProxyManager {
                 return { ...urlInfo, ...resultado };
             });
             
-            const batchResultados = await Promise.all(promises);
-            resultados.push(...batchResultados);
+            const batchResults = await Promise.all(promises);
+            resultados.push(...batchResults);
             
             // Delay entre batches para não sobrecarregar
-            if (i + limite < urls.length) {
-                await new Promise(r => setTimeout(r, 1000));
+            if (i + concurrency < urls.length) {
+                await new Promise(r => setTimeout(r, 1500));
             }
         }
         
