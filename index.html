@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CEFS Vestibular Monitor - Colégio Frei Seráfico</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&family=Open+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="icon" type="image/png" href="assets/logo-bolinha.png">
+</head>
+<body>
+    <!-- Header com Identidade CEFS -->
+    <header class="header-cefs">
+        <div class="container">
+            <div class="header-top">
+                <div class="logo-container">
+                    <img src="assets/logo-bolinha.png" alt="CEFS" class="logo-bolinha">
+                    <div class="logo-texto">
+                        <h1>CEFS</h1>
+                        <span>Colégio Frei Seráfico</span>
+                    </div>
+                </div>
+                <div class="header-tagline">
+                    <i class="fas fa-graduation-cap"></i>
+                    <span>Preparação para o Futuro</span>
+                </div>
+            </div>
+            
+            <div class="header-main">
+                <img src="assets/logo-cefs.png" alt="Frei Seráfico" class="logo-principal">
+                <div class="titulo-sistema">
+                    <h2>VESTIBULAR MONITOR</h2>
+                    <p>Sistema de Busca de Editais Universitários</p>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Barra de Navegação -->
+    <nav class="nav-cefs">
+        <div class="container">
+            <div class="nav-links">
+                <a href="#" class="active"><i class="fas fa-home"></i> Início</a>
+                <a href="#sobre"><i class="fas fa-info-circle"></i> Sobre</a>
+                <a href="#universidades"><i class="fas fa-university"></i> Universidades</a>
+                <a href="#ajuda"><i class="fas fa-question-circle"></i> Ajuda</a>
+            </div>
+            <div class="nav-status">
+                <span class="status-dot online"></span>
+                <span>Sistema Online</span>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Seção de Busca -->
+    <section class="search-section-cefs">
+        <div class="container">
+            <div class="search-header">
+                <h3><i class="fas fa-search"></i> Buscar Editais de Vestibular</h3>
+                <p>Monitore 18 universidades federais e estaduais em tempo real</p>
+            </div>
+
+            <!-- Filtros -->
+            <div class="filters-cefs">
+                <div class="filter-row">
+                    <div class="filter-group">
+                        <label><i class="fas fa-map-marker-alt"></i> Estado</label>
+                        <select id="filter-estado">
+                            <option value="todos">Todos os Estados</option>
+                            <option value="MG">⛏️ Minas Gerais (11 federais)</option>
+                            <option value="SP">🏙️ São Paulo (6 universidades)</option>
+                            <option value="RJ">🏖️ Rio de Janeiro (4 federais)</option>
+                        </select>
+                    </div>
+                    
+                    <div class="filter-group">
+                        <label><i class="fas fa-clipboard-list"></i> Tipo de Processo</label>
+                        <select id="filter-tipo">
+                            <option value="todos">Todos os Tipos</option>
+                            <option value="VESTIBULAR_SERIADO">📚 Vestibular Seriado</option>
+                            <option value="VESTIBULAR_CONVENCIONAL">📝 Vestibular Convencional</option>
+                            <option value="SISU/ENEM">📊 SISU/ENEM</option>
+                        </select>
+                    </div>
+
+                    <div class="filter-group">
+                        <label><i class="fas fa-university"></i> Universidade</label>
+                        <select id="filter-universidade">
+                            <option value="todos">Todas as Universidades</option>
+                            <!-- Preenchido via JS -->
+                        </select>
+                    </div>
+                </div>
+
+                <div class="filter-row secondary">
+                    <div class="filter-group large">
+                        <label><i class="fas fa-book"></i> Curso de Interesse (Opcional)</label>
+                        <input type="text" id="filter-curso" placeholder="Ex: Medicina, Engenharia, Direito...">
+                    </div>
+                    
+                    <div class="filter-group checkbox-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="check-inscricoes-abertas">
+                            <span class="checkmark"></span>
+                            Apenas inscrições abertas
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Botão de Busca -->
+            <div class="search-actions">
+                <button id="btn-buscar" class="btn-cefs-primary">
+                    <i class="fas fa-search"></i>
+                    <span>BUSCAR EDITAIS AGORA</span>
+                </button>
+                
+                <button id="btn-limpar" class="btn-cefs-secondary">
+                    <i class="fas fa-eraser"></i>
+                    Limpar Filtros
+                </button>
+            </div>
+
+            <!-- Estatísticas Rápidas -->
+            <div class="quick-stats" id="quick-stats">
+                <div class="stat-item">
+                    <i class="fas fa-university"></i>
+                    <span class="stat-number" id="stat-universidades">18</span>
+                    <span class="stat-label">Universidades</span>
+                </div>
+                <div class="stat-item">
+                    <i class="fas fa-file-alt"></i>
+                    <span class="stat-number" id="stat-editais">-</span>
+                    <span class="stat-label">Editais Encontrados</span>
+                </div>
+                <div class="stat-item highlight">
+                    <i class="fas fa-clock"></i>
+                    <span class="stat-number" id="stat-atualizacao">Agora</span>
+                    <span class="stat-label">Última Atualização</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Loading Overlay -->
+    <div id="loading" class="loading-overlay-cefs" style="display: none;">
+        <div class="loading-content">
+            <div class="loading-logo">
+                <img src="assets/logo-bolinha.png" alt="CEFS" class="loading-spin">
+            </div>
+            <h3>Consultando Universidades...</h3>
+            <div class="progress-bar-cefs">
+                <div class="progress-fill" id="progress-fill"></div>
+            </div>
+            <p id="loading-status">Inicializando busca</p>
+            <div class="universities-progress" id="universities-list"></div>
+        </div>
+    </div>
+
+    <!-- Resultados -->
+    <section class="results-section-cefs" id="results-section" style="display: none;">
+        <div class="container">
+            <div class="results-header-cefs">
+                <div class="results-title">
+                    <i class="fas fa-clipboard-check"></i>
+                    <h3>Resultados da Busca</h3>
+                    <span id="results-count"></span>
+                </div>
+                
+                <div class="results-actions">
+                    <button class="btn-cefs-action" onclick="exportarCSV()">
+                        <i class="fas fa-file-csv"></i> Exportar CSV
+                    </button>
+                    <button class="btn-cefs-action" onclick="imprimirResultados()">
+                        <i class="fas fa-print"></i> Imprimir
+                    </button>
+                    <button class="btn-cefs-action" onclick="compartilhar()">
+                        <i class="fas fa-share-alt"></i> Compartilhar
+                    </button>
+                </div>
+            </div>
+
+            <!-- Grid de Resultados -->
+            <div id="results-container" class="results-grid-cefs">
+                <!-- Cards inseridos via JS -->
+            </div>
+
+            <!-- Paginação -->
+            <div class="pagination-cefs" id="pagination" style="display: none;">
+                <button class="btn-page" onclick="paginaAnterior()">
+                    <i class="fas fa-chevron-left"></i> Anterior
+                </button>
+                <span id="pagina-atual">Página 1 de 5</span>
+                <button class="btn-page" onclick="proximaPagina()">
+                    Próxima <i class="fas fa-chevron-right"></i>
+                </button>
+            </div>
+
+            <!-- Sem Resultados -->
+            <div id="no-results" class="no-results-cefs" style="display: none;">
+                <div class="no-results-icon">
+                    <i class="fas fa-inbox"></i>
+                </div>
+                <h4>Nenhum edital encontrado</h4>
+                <p>Tente ajustar os filtros de busca ou verifique novamente mais tarde.</p>
+                <button class="btn-cefs-secondary" onclick="resetarFiltros()">
+                    <i class="fas fa-undo"></i> Resetar Filtros
+                </button>
+            </div>
+        </div>
+    </section>
+
+    <!-- Seção de Universidades Monitoradas -->
+    <section class="universities-section-cefs" id="universidades">
+        <div class="container">
+            <h3 class="section-title-cefs">
+                <i class="fas fa-university"></i>
+                Universidades Monitoradas
+            </h3>
+            
+            <div class="universities-grid">
+                <div class="uni-card mg">
+                    <div class="uni-header">
+                        <span class="uni-estado">MG</span>
+                        <h4>Minas Gerais</h4>
+                    </div>
+                    <ul class="uni-list">
+                        <li><strong>UFMG</strong> - Belo Horizonte</li>
+                        <li><strong>UFU</strong> - Uberlândia <span class="badge seriado">SERIADO</span></li>
+                        <li><strong>UFJF</strong> - Juiz de Fora <span class="badge seriado">SERIADO</span></li>
+                        <li><strong>UFV</strong> - Viçosa</li>
+                        <li><strong>UFTM</strong> - Uberaba</li>
+                        <li><strong>UFLA</strong> - Lavras</li>
+                        <li><strong>UFSJ</strong> - São João del-Rei</li>
+                        <li><strong>UFOP</strong> - Ouro Preto</li>
+                        <li><strong>UNIFAL-MG</strong> - Alfenas</li>
+                        <li><strong>UNIFEI</strong> - Itajubá</li>
+                        <li><strong>UFVJM</strong> - Diamantina</li>
+                    </ul>
+                </div>
+
+                <div class="uni-card sp">
+                    <div class="uni-header">
+                        <span class="uni-estado">SP</span>
+                        <h4>São Paulo</h4>
+                    </div>
+                    <ul class="uni-list">
+                        <li><strong>USP</strong> - São Paulo <span class="badge estadual">ESTADUAL</span></li>
+                        <li><strong>UNICAMP</strong> - Campinas <span class="badge seriado">SERIADO</span></li>
+                        <li><strong>UNESP</strong> - Várias <span class="badge seriado">SERIADO</span></li>
+                        <li><strong>UNIFESP</strong> - São Paulo</li>
+                        <li><strong>UFSCar</strong> - São Carlos</li>
+                        <li><strong>UFABC</strong> - Santo André</li>
+                    </ul>
+                </div>
+
+                <div class="uni-card rj">
+                    <div class="uni-header">
+                        <span class="uni-estado">RJ</span>
+                        <h4>Rio de Janeiro</h4>
+                    </div>
+                    <ul class="uni-list">
+                        <li><strong>UFRJ</strong> - Rio de Janeiro</li>
+                        <li><strong>UFF</strong> - Niterói</li>
+                        <li><strong>UNIRIO</strong> - Rio de Janeiro</li>
+                        <li><strong>UFRRJ</strong> - Seropédica</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer CEFS -->
+    <footer class="footer-cefs">
+        <div class="container">
+            <div class="footer-top">
+                <div class="footer-brand">
+                    <img src="assets/logo-bolinha.png" alt="CEFS">
+                    <div>
+                        <h4>Colégio Frei Seráfico</h4>
+                        <p>Excelência em Educação</p>
+                    </div>
+                </div>
+                
+                <div class="footer-links">
+                    <a href="https://www.freiserafico.com.br" target="_blank">
+                        <i class="fas fa-globe"></i> Site Oficial
+                    </a>
+                    <a href="mailto:contato@freiserafico.com.br">
+                        <i class="fas fa-envelope"></i> Contato
+                    </a>
+                </div>
+            </div>
+            
+            <div class="footer-bottom">
+                <p>
+                    <strong>CEFS Vestibular Monitor</strong> - Sistema de consulta a editais universitários
+                </p>
+                <p class="disclaimer">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    Os dados são obtidos diretamente dos sites das universidades. 
+                    Sempre confirme as informações no edital oficial.
+                </p>
+                <p class="copyright">
+                    © 2026 Colégio Frei Seráfico. Todos os direitos reservados.
+                </p>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Scripts -->
+    <script src="js/universities.js"></script>
+    <script src="js/parser.js"></script>
+    <script src="js/proxy.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
